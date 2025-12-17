@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mosaic Remover & Video Enhancer Pro with Gemini AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FFmpeg for transcoding -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
+    <!-- Markdown Parser for AI response (optional) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/jpeg" href="favicon.ico">
+    
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Prompt', 'Segoe UI', sans-serif;
+            overscroll-behavior: none;
+        }
+        .canvas-wrapper {
+            width: 100%;
+            height: 45vh;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        /* Custom UI Elements */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -7px;
+            border: 2px solid #1e293b;
+            box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #475569;
+            border-radius: 2px;
+        }
+        .ai-glow {
+            animation: glow 2s infinite alternate;
+        }
+        @keyframes glow {
+            from { box-shadow: 0 0 5px #3b82f6, 0 0 10px #3b82f6; }
+            to { box-shadow: 0 0 10px #8b5cf6, 0 0 20px #8b5cf6; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="h-14 bg-slate-900 flex items-center justify-between px-4 border-b border-slate-700 shadow-lg z-10">
+        <div class="flex items-center gap-2">
+            <img src="Gemini_Generated_Image_l56orpl56orpl56o (3).jpg" class="w-8 h-8 rounded-full border-2 border-blue-500" alt="Icon">
+            <h1 class="text-sm font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">Mosaic Remover AI</h1>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="document.getElementById('apiKeyModal').classList.remove('hidden')" class="text-xs text-slate-400 hover:text-white border border-slate-600 px-2 py-1 rounded">
+                🔑 API Key
+            </button>
+            <button id="uploadBtn" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-2 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                Upload
+            </button>
+        </div>
+        <input type="file" id="videoInput" accept="video/*" class="hidden">
+    </header>
+
+    <!-- Canvas Area -->
+    <div class="canvas-wrapper">
+        <p id="placeholderText" class="absolute text-slate-500 text-sm flex flex-col items-center gap-2">
+            <span>แตะ Upload เพื่อเลือกวิดีโอ</span>
+            <span class="text-xs opacity-50">(รองรับ MP4, WebM, MOV)</span>
+        </p>
+        <canvas id="videoCanvas"></canvas>
+        
+        <!-- Status Overlays -->
+        <div id="processingOverlay" class="hidden absolute inset-0 bg-black/80 z-20 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <h3 class="text-white font-bold text-lg mb-1">กำลังประมวลผล...</h3>
+            <p id="progressText" class="text-slate-300 text-xs">กำลังแปลงไฟล์ กรุณาอย่าปิดหน้าจอ</p>
+        </div>
+
+        <div id="aiOverlay" class="hidden absolute inset-0 bg-black/80 z-20 flex flex-col items-center justify-center p-6 text-center">
+            <div class="text-4xl mb-4 animate-bounce">✨</div>
+            <h3 class="text-white font-bold text-lg mb-1 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">Gemini กำลังวิเคราะห์...</h3>
+            <p class="text-slate-300 text-xs">กำลังตรวจสอบแสง สี และความคมชัดของเฟรม</p>
+        </div>
+        
+        <div id="recordingBadge" class="hidden absolute top-4 right-4 flex items-center gap-2 bg-red-500/90 text-white text-[10px] font-bold px-3 py-1 rounded-full animate-pulse shadow-lg">
+            <div class="w-2 h-2 bg-white rounded-full"></div> REC
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <main class="flex-1 glass-panel overflow-y-auto pb-safe">
+        <div class="p-4 space-y-5">
+            
+            <!-- AI Section -->
+            <button id="aiEnhanceBtn" class="w-full bg-gradient-to-r from-indigo-900 to-purple-900 border border-purple-500/30 hover:border-purple-400 text-white py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg relative overflow-hidden group">
+                <div class="absolute inset-0 bg-white/5 group-hover:bg-white/10 transition-colors"></div>
+                <span class="text-xl">✨</span>
+                <div class="text-left">
+                    <div class="text-sm font-bold text-purple-200">AI Magic Analyze</div>
+                    <div class="text-[10px] text-purple-300/70">ให้ Gemini ตั้งค่าที่ดีที่สุดให้อัตโนมัติ</div>
+                </div>
+            </button>
+
+            <!-- Filters Section -->
+            <div class="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Manual Adjustment</h3>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <span class="text-[10px] text-blue-300">Unmosaic Mode</span>
+                        <input type="checkbox" id="unmosaicMode" class="w-4 h-4 accent-blue-500">
+                    </label>
+                </div>
+
+                <div class="space-y-4">
+                    <!-- Contrast -->
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-xs text-slate-300">Contrast (ความคมชัด)</label>
+                            <span id="contrastVal" class="text-[10px] text-blue-400">110%</span>
+                        </div>
+                        <input type="range" id="contrast" min="100" max="250" value="110">
+                    </div>
+
+                    <!-- Brightness -->
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-xs text-slate-300">Brightness (ความสว่าง)</label>
+                            <span id="brightnessVal" class="text-[10px] text-blue-400">105%</span>
+                        </div>
+                        <input type="range" id="brightness" min="80" max="150" value="105">
+                    </div>
+
+                    <!-- Sharpen (via SVG filter hidden logic) -->
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-xs text-slate-300">Sharpness (ลดเบลอ)</label>
+                            <span id="saturateVal" class="text-[10px] text-blue-400">120%</span>
+                        </div>
+                        <input type="range" id="saturate" min="0" max="200" value="120">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export Section -->
+            <div class="space-y-3">
+                <div class="flex gap-2">
+                    <select id="formatSelect" class="bg-slate-800 text-white text-xs px-3 py-2 rounded-lg border border-slate-600 outline-none focus:border-blue-500 flex-1">
+                        <option value="webm">WebM (เร็วที่สุด - แนะนำ)</option>
+                        <option value="mp4">MP4 (ช้า - แปลงไฟล์)</option>
+                        <option value="avi">AVI (ช้ามาก - แปลงไฟล์)</option>
+                    </select>
+                    <button id="playBtn" disabled class="flex-1 bg-slate-700 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium">
+                        Play/Pause
+                    </button>
+                </div>
+
+                <button id="exportBtn" disabled class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 disabled:opacity-50 text-white py-3.5 rounded-xl text-sm font-bold shadow-lg shadow-blue-900/40 flex items-center justify-center gap-2">
+                    <span>Start Processing & Save</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                </button>
+                
+                <p class="text-[10px] text-slate-500 text-center px-4">
+                    * การเลือก MP4/AVI บนมือถืออาจใช้เวลาแปลงไฟล์นานกว่าความยาววิดีโอจริง 2-3 เท่า
+                </p>
+            </div>
+        </div>
+    </main>
+
+    <!-- API Key Modal -->
+    <div id="apiKeyModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+        <div class="bg-slate-800 rounded-xl p-6 w-full max-w-sm border border-slate-700">
+            <h3 class="text-white font-bold text-lg mb-2">Gemini API Key</h3>
+            <p class="text-slate-400 text-xs mb-4">ใส่ API Key เพื่อใช้งานฟีเจอร์ AI Auto-Enhance (รับฟรีที่ aistudio.google.com)</p>
+            <input type="password" id="apiKeyInput" placeholder="Paste API Key here..." class="w-full bg-slate-900 text-white p-3 rounded-lg border border-slate-600 mb-4 text-sm focus:border-blue-500 outline-none">
+            <div class="flex justify-end gap-2">
+                <button onclick="document.getElementById('apiKeyModal').classList.add('hidden')" class="px-4 py-2 text-slate-300 text-sm">Cancel</button>
+                <button onclick="saveApiKey()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Video Source -->
+    <video id="sourceVideo" class="hidden" playsinline crossorigin="anonymous"></video>
+
+    <script>
+        // --- Variables ---
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        let ffmpeg = null;
+        
+        const videoInput = document.getElementById('videoInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const sourceVideo = document.getElementById('sourceVideo');
+        const canvas = document.getElementById('videoCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const playBtn = document.getElementById('playBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const processingOverlay = document.getElementById('processingOverlay');
+        const aiOverlay = document.getElementById('aiOverlay');
+        const progressText = document.getElementById('progressText');
+        const formatSelect = document.getElementById('formatSelect');
+        const unmosaicMode = document.getElementById('unmosaicMode');
+        const aiEnhanceBtn = document.getElementById('aiEnhanceBtn');
+
+        let isPlaying = false;
+        let isRecording = false;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let animationId;
+        
+        // Filters
+        const filters = {
+            contrast: document.getElementById('contrast'),
+            brightness: document.getElementById('brightness'),
+            saturate: document.getElementById('saturate')
+        };
+        const filterVals = {
+            contrast: document.getElementById('contrastVal'),
+            brightness: document.getElementById('brightnessVal'),
+            saturate: document.getElementById('saturateVal')
+        };
+
+        // --- Initialization ---
+        
+        // Load FFmpeg lazy
+        const initFFmpeg = async () => {
+            if (ffmpeg === null) {
+                ffmpeg = createFFmpeg({ log: true });
+                await ffmpeg.load();
+            }
+        };
+
+        // Load API Key
+        let geminiApiKey = localStorage.getItem('gemini_api_key') || '';
+        if(geminiApiKey) document.getElementById('apiKeyInput').value = geminiApiKey;
+
+        function saveApiKey() {
+            const key = document.getElementById('apiKeyInput').value.trim();
+            if(key) {
+                geminiApiKey = key;
+                localStorage.setItem('gemini_api_key', key);
+                document.getElementById('apiKeyModal').classList.add('hidden');
+                alert('API Key saved!');
+            }
+        }
+
+        // --- Event Listeners ---
+        
+        uploadBtn.addEventListener('click', () => videoInput.click());
+        
+        videoInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const url = URL.createObjectURL(file);
+            sourceVideo.src = url;
+            
+            sourceVideo.onloadedmetadata = () => {
+                canvas.width = sourceVideo.videoWidth;
+                canvas.height = sourceVideo.videoHeight;
+                
+                document.getElementById('placeholderText').style.display = 'none';
+                playBtn.disabled = false;
+                exportBtn.disabled = false;
+                
+                // Reset Filters to Default
+                resetFilters();
+                drawFrame();
+            };
+        });
+
+        playBtn.addEventListener('click', () => {
+            if (sourceVideo.paused) {
+                sourceVideo.play();
+                isPlaying = true;
+                drawLoop();
+            } else {
+                sourceVideo.pause();
+                isPlaying = false;
+                cancelAnimationFrame(animationId);
+            }
+        });
+
+        // Filter UI Updates
+        Object.keys(filters).forEach(key => {
+            filters[key].addEventListener('input', (e) => {
+                filterVals[key].textContent = e.target.value + '%';
+                if (!isPlaying) requestAnimationFrame(drawFrame);
+            });
+        });
+
+        // Unmosaic Preset
+        unmosaicMode.addEventListener('change', (e) => {
+            if(e.target.checked) {
+                // High Contrast, High Sharpening preset
+                setFilters(140, 110, 130);
+            } else {
+                resetFilters();
+            }
+            if (!isPlaying) requestAnimationFrame(drawFrame);
+        });
+
+        function resetFilters() {
+            setFilters(110, 105, 120);
+        }
+
+        function setFilters(c, b, s) {
+            filters.contrast.value = c;
+            filters.brightness.value = b;
+            filters.saturate.value = s;
+            updateFilterLabels();
+        }
+
+        function updateFilterLabels() {
+            filterVals.contrast.textContent = filters.contrast.value + '%';
+            filterVals.brightness.textContent = filters.brightness.value + '%';
+            filterVals.saturate.textContent = filters.saturate.value + '%';
+        }
+
+        // --- GEMINI AI Logic ---
+
+        aiEnhanceBtn.addEventListener('click', async () => {
+            if (!sourceVideo.src || sourceVideo.src === '') {
+                alert('กรุณาเลือกวิดีโอก่อนครับ');
+                return;
+            }
+            if (!geminiApiKey) {
+                document.getElementById('apiKeyModal').classList.remove('hidden');
+                return;
+            }
+
+            aiOverlay.classList.remove('hidden');
+            
+            try {
+                // 1. Capture current frame
+                const frameData = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+                // 2. Prepare API Call
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`;
+                
+                const prompt = `
+                    You are a professional video restoration expert. Analyze this image frame. It might be low quality, blurry, or have mosaic artifacts. 
+                    Suggest the best CSS filter values to make it look as clear, sharp, and vivid as possible.
+                    
+                    Return ONLY a JSON object with these integer properties:
+                    - contrast (range 100-200, default is 110)
+                    - brightness (range 80-150, default is 105)
+                    - saturate (range 100-200, default is 120)
+                    
+                    Example response: {"contrast": 135, "brightness": 95, "saturate": 140}
+                `;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                { inlineData: { mimeType: "image/jpeg", data: frameData } }
+                            ]
+                        }],
+                        generationConfig: {
+                            responseMimeType: "application/json"
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) throw new Error(data.error.message);
+                
+                const suggestion = JSON.parse(data.candidates[0].content.parts[0].text);
+                
+                // 3. Apply Suggestion
+                setFilters(suggestion.contrast, suggestion.brightness, suggestion.saturate);
+                
+                // Uncheck manual unmosaic if AI is used
+                unmosaicMode.checked = false;
+                
+                alert(`✨ Gemini Analyzed!\nContrast: ${suggestion.contrast}%\nBrightness: ${suggestion.brightness}%\nSaturate: ${suggestion.saturate}%`);
+                
+                if (!isPlaying) requestAnimationFrame(drawFrame);
+
+            } catch (error) {
+                console.error(error);
+                alert('AI Error: ' + error.message);
+            } finally {
+                aiOverlay.classList.add('hidden');
+            }
+        });
+
+
+        // --- Drawing Logic ---
+
+        function drawFrame() {
+            // Apply CSS Filters
+            const filterString = `contrast(${filters.contrast.value}%) brightness(${filters.brightness.value}%) saturate(${filters.saturate.value}%)`;
+            ctx.filter = filterString;
+            
+            ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
+        }
+
+        function drawLoop() {
+            drawFrame();
+            if (!sourceVideo.paused && !sourceVideo.ended) {
+                animationId = requestAnimationFrame(drawLoop);
+            }
+        }
+
+        // --- Recording & Export Logic ---
+
+        exportBtn.addEventListener('click', async () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                // Check format requirement
+                const format = formatSelect.value;
+                if (format !== 'webm') {
+                     if(!confirm(`การแปลงเป็น ${format.toUpperCase()} อาจใช้เวลานานบนมือถือ (2-3 นาทีสำหรับคลิปสั้น)\n\nยืนยันที่จะทำต่อหรือไม่?`)) {
+                         return;
+                     }
+                     processingOverlay.classList.remove('hidden');
+                     progressText.textContent = 'Loading Transcoder Engine...';
+                     try {
+                        await initFFmpeg();
+                     } catch(e) {
+                         alert("ไม่สามารถโหลดระบบแปลงไฟล์ได้: " + e.message);
+                         processingOverlay.classList.add('hidden');
+                         return;
+                     }
+                     processingOverlay.classList.add('hidden');
+                }
+                
+                startRecording();
+            }
+        });
+
+        function startRecording() {
+            recordedChunks = [];
+            const stream = canvas.captureStream(30); 
+            
+            let options = { mimeType: 'video/webm;codecs=vp9' };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options = { mimeType: 'video/webm;codecs=vp8' };
+                if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                    options = { mimeType: 'video/webm' };
+                }
+            }
+
+            mediaRecorder = new MediaRecorder(stream, options);
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = processAndDownload;
+
+            sourceVideo.currentTime = 0;
+            sourceVideo.play();
+            drawLoop();
+            mediaRecorder.start();
+
+            isRecording = true;
+            exportBtn.innerHTML = '<span class="animate-pulse">Stop & Save</span>';
+            exportBtn.classList.add('bg-red-600', 'from-red-600', 'to-red-700');
+            exportBtn.classList.remove('from-blue-600', 'to-indigo-600');
+            document.getElementById('recordingBadge').classList.remove('hidden');
+            
+            formatSelect.disabled = true;
+            videoInput.disabled = true;
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            sourceVideo.pause();
+            cancelAnimationFrame(animationId);
+            
+            isRecording = false;
+            exportBtn.innerHTML = '<span>Start Processing & Save</span>';
+            exportBtn.classList.remove('bg-red-600', 'from-red-600', 'to-red-700');
+            exportBtn.classList.add('from-blue-600', 'to-indigo-600');
+            document.getElementById('recordingBadge').classList.add('hidden');
+        }
+
+        async function processAndDownload() {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const targetFormat = formatSelect.value;
+
+            if (targetFormat === 'webm') {
+                downloadBlob(blob, `enhanced_${Date.now()}.webm`);
+                resetUI();
+            } else {
+                await transcodeVideo(blob, targetFormat);
+            }
+        }
+
+        async function transcodeVideo(webmBlob, format) {
+            processingOverlay.classList.remove('hidden');
+            progressText.textContent = `Preparing conversion to ${format.toUpperCase()}...`;
+
+            try {
+                if (!ffmpeg.isLoaded()) await ffmpeg.load();
+
+                const inputName = 'input.webm';
+                const outputName = `output.${format}`;
+
+                ffmpeg.FS('writeFile', inputName, await fetchFile(webmBlob));
+                progressText.textContent = `Converting... (This may take a while)`;
+                
+                await ffmpeg.run('-i', inputName, '-c:v', 'copy', outputName); 
+                const data = ffmpeg.FS('readFile', outputName);
+
+                const newBlob = new Blob([data.buffer], { type: `video/${format}` });
+                downloadBlob(newBlob, `enhanced_${Date.now()}.${format}`);
+
+                ffmpeg.FS('unlink', inputName);
+                ffmpeg.FS('unlink', outputName);
+
+            } catch (error) {
+                console.error(error);
+                alert(`Error during conversion: ${error.message}\nDownloading as WebM instead.`);
+                downloadBlob(webmBlob, `enhanced_fallback_${Date.now()}.webm`);
+            } finally {
+                processingOverlay.classList.add('hidden');
+                resetUI();
+            }
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        function resetUI() {
+            formatSelect.disabled = false;
+            videoInput.disabled = false;
+            sourceVideo.currentTime = 0;
+            drawFrame();
+        }
+    </script>
+</body>
+</html>
