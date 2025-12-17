@@ -3,12 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mosaic Remover & Video Enhancer Pro with Gemini AI</title>
+    <title>Mosaic Remover & Video Enhancer Pro (Stable)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FFmpeg for transcoding -->
+    <!-- FFmpeg for transcoding (Version 0.11.0) -->
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
-    <!-- Markdown Parser for AI response (optional) -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     
     <!-- Favicon -->
     <link rel="icon" type="image/jpeg" href="favicon.ico">
@@ -105,7 +103,7 @@
         <div id="processingOverlay" class="hidden absolute inset-0 bg-black/80 z-20 flex flex-col items-center justify-center p-6 text-center">
             <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
             <h3 class="text-white font-bold text-lg mb-1">กำลังประมวลผล...</h3>
-            <p id="progressText" class="text-slate-300 text-xs">กำลังแปลงไฟล์ กรุณาอย่าปิดหน้าจอ</p>
+            <p id="progressText" class="text-slate-300 text-xs">ระบบกำลังทำงาน กรุณารอสักครู่</p>
         </div>
 
         <div id="aiOverlay" class="hidden absolute inset-0 bg-black/80 z-20 flex flex-col items-center justify-center p-6 text-center">
@@ -162,10 +160,10 @@
                         <input type="range" id="brightness" min="80" max="150" value="105">
                     </div>
 
-                    <!-- Sharpen (via SVG filter hidden logic) -->
+                    <!-- Saturate -->
                     <div>
                         <div class="flex justify-between mb-1">
-                            <label class="text-xs text-slate-300">Sharpness (ลดเบลอ)</label>
+                            <label class="text-xs text-slate-300">Saturation (ความสด)</label>
                             <span id="saturateVal" class="text-[10px] text-blue-400">120%</span>
                         </div>
                         <input type="range" id="saturate" min="0" max="200" value="120">
@@ -177,23 +175,27 @@
             <div class="space-y-3">
                 <div class="flex gap-2">
                     <select id="formatSelect" class="bg-slate-800 text-white text-xs px-3 py-2 rounded-lg border border-slate-600 outline-none focus:border-blue-500 flex-1">
-                        <option value="webm">WebM (เร็วที่สุด - แนะนำ)</option>
-                        <option value="mp4">MP4 (ช้า - แปลงไฟล์)</option>
-                        <option value="avi">AVI (ช้ามาก - แปลงไฟล์)</option>
+                        <option value="webm">WebM (แนะนำ - รองรับทุกเครื่อง)</option>
+                        <option value="mp4" id="mp4Option">MP4 (อาจไม่รองรับ)</option>
+                        <option value="avi" id="aviOption">AVI (อาจไม่รองรับ)</option>
                     </select>
                     <button id="playBtn" disabled class="flex-1 bg-slate-700 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium">
                         Play/Pause
                     </button>
                 </div>
 
+                <!-- Warning Message for SharedArrayBuffer -->
+                <div id="compatibilityWarning" class="hidden bg-yellow-900/30 border border-yellow-700/50 p-2 rounded-lg">
+                    <p class="text-[10px] text-yellow-200 text-center">
+                        ⚠️ Browser นี้ไม่รองรับการแปลง MP4 (Security restriction).<br>
+                        ระบบจะบันทึกเป็น <b>WebM</b> อัตโนมัติ (เปิดดูได้ปกติ)
+                    </p>
+                </div>
+
                 <button id="exportBtn" disabled class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 disabled:opacity-50 text-white py-3.5 rounded-xl text-sm font-bold shadow-lg shadow-blue-900/40 flex items-center justify-center gap-2">
                     <span>Start Processing & Save</span>
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                 </button>
-                
-                <p class="text-[10px] text-slate-500 text-center px-4">
-                    * การเลือก MP4/AVI บนมือถืออาจใช้เวลาแปลงไฟล์นานกว่าความยาววิดีโอจริง 2-3 เท่า
-                </p>
             </div>
         </div>
     </main>
@@ -218,6 +220,7 @@
         // --- Variables ---
         const { createFFmpeg, fetchFile } = FFmpeg;
         let ffmpeg = null;
+        let ffmpegSupported = false;
         
         const videoInput = document.getElementById('videoInput');
         const uploadBtn = document.getElementById('uploadBtn');
@@ -232,6 +235,7 @@
         const formatSelect = document.getElementById('formatSelect');
         const unmosaicMode = document.getElementById('unmosaicMode');
         const aiEnhanceBtn = document.getElementById('aiEnhanceBtn');
+        const compatibilityWarning = document.getElementById('compatibilityWarning');
 
         let isPlaying = false;
         let isRecording = false;
@@ -251,14 +255,52 @@
             saturate: document.getElementById('saturateVal')
         };
 
-        // --- Initialization ---
+        // --- Initialization & Compatibility Check ---
         
-        // Load FFmpeg lazy
-        const initFFmpeg = async () => {
-            if (ffmpeg === null) {
-                ffmpeg = createFFmpeg({ log: true });
-                await ffmpeg.load();
+        function checkCompatibility() {
+            // Check for SharedArrayBuffer support (Required for FFmpeg MP4 conversion)
+            if (typeof SharedArrayBuffer === 'undefined') {
+                console.warn('SharedArrayBuffer is NOT supported. Disabling MP4 transcoding.');
+                ffmpegSupported = false;
+                
+                // Show warning UI
+                compatibilityWarning.classList.remove('hidden');
+                
+                // Disable incompatible options
+                document.getElementById('mp4Option').disabled = true;
+                document.getElementById('mp4Option').text += " (Not Supported)";
+                document.getElementById('aviOption').disabled = true;
+                document.getElementById('aviOption').text += " (Not Supported)";
+                
+                // Force WebM
+                formatSelect.value = 'webm';
+                formatSelect.disabled = true;
+            } else {
+                ffmpegSupported = true;
             }
+        }
+        
+        // Run check on load
+        checkCompatibility();
+
+        const initFFmpeg = async () => {
+            if (!ffmpegSupported) return false;
+            
+            if (ffmpeg === null) {
+                try {
+                    ffmpeg = createFFmpeg({ log: true });
+                    await ffmpeg.load();
+                    return true;
+                } catch (e) {
+                    console.error("FFmpeg Load Error:", e);
+                    alert("ไม่สามารถโหลดระบบแปลงไฟล์ได้ (Error: " + e.message + ")\nระบบจะบันทึกเป็น WebM แทน");
+                    ffmpegSupported = false;
+                    formatSelect.value = 'webm';
+                    formatSelect.disabled = true;
+                    return false;
+                }
+            }
+            return true;
         };
 
         // Load API Key
@@ -294,7 +336,6 @@
                 playBtn.disabled = false;
                 exportBtn.disabled = false;
                 
-                // Reset Filters to Default
                 resetFilters();
                 drawFrame();
             };
@@ -323,7 +364,6 @@
         // Unmosaic Preset
         unmosaicMode.addEventListener('change', (e) => {
             if(e.target.checked) {
-                // High Contrast, High Sharpening preset
                 setFilters(140, 110, 130);
             } else {
                 resetFilters();
@@ -403,10 +443,7 @@
                 
                 const suggestion = JSON.parse(data.candidates[0].content.parts[0].text);
                 
-                // 3. Apply Suggestion
                 setFilters(suggestion.contrast, suggestion.brightness, suggestion.saturate);
-                
-                // Uncheck manual unmosaic if AI is used
                 unmosaicMode.checked = false;
                 
                 alert(`✨ Gemini Analyzed!\nContrast: ${suggestion.contrast}%\nBrightness: ${suggestion.brightness}%\nSaturate: ${suggestion.saturate}%`);
@@ -425,10 +462,8 @@
         // --- Drawing Logic ---
 
         function drawFrame() {
-            // Apply CSS Filters
             const filterString = `contrast(${filters.contrast.value}%) brightness(${filters.brightness.value}%) saturate(${filters.saturate.value}%)`;
             ctx.filter = filterString;
-            
             ctx.drawImage(sourceVideo, 0, 0, canvas.width, canvas.height);
         }
 
@@ -445,20 +480,25 @@
             if (isRecording) {
                 stopRecording();
             } else {
-                // Check format requirement
                 const format = formatSelect.value;
-                if (format !== 'webm') {
+                
+                // If user selected MP4 but it's not actually supported (bypass disable via inspect), force WebM
+                if (format !== 'webm' && !ffmpegSupported) {
+                    alert("ระบบของคุณไม่รองรับการแปลง MP4 จึงจะบันทึกเป็น WebM แทน");
+                    formatSelect.value = 'webm';
+                }
+
+                if (format !== 'webm' && ffmpegSupported) {
                      if(!confirm(`การแปลงเป็น ${format.toUpperCase()} อาจใช้เวลานานบนมือถือ (2-3 นาทีสำหรับคลิปสั้น)\n\nยืนยันที่จะทำต่อหรือไม่?`)) {
                          return;
                      }
                      processingOverlay.classList.remove('hidden');
                      progressText.textContent = 'Loading Transcoder Engine...';
-                     try {
-                        await initFFmpeg();
-                     } catch(e) {
-                         alert("ไม่สามารถโหลดระบบแปลงไฟล์ได้: " + e.message);
+                     
+                     const loaded = await initFFmpeg();
+                     if (!loaded) {
                          processingOverlay.classList.add('hidden');
-                         return;
+                         return; 
                      }
                      processingOverlay.classList.add('hidden');
                 }
@@ -518,7 +558,7 @@
             const blob = new Blob(recordedChunks, { type: 'video/webm' });
             const targetFormat = formatSelect.value;
 
-            if (targetFormat === 'webm') {
+            if (targetFormat === 'webm' || !ffmpegSupported) {
                 downloadBlob(blob, `enhanced_${Date.now()}.webm`);
                 resetUI();
             } else {
@@ -531,17 +571,23 @@
             progressText.textContent = `Preparing conversion to ${format.toUpperCase()}...`;
 
             try {
+                // Double check load
                 if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
                 const inputName = 'input.webm';
                 const outputName = `output.${format}`;
 
                 ffmpeg.FS('writeFile', inputName, await fetchFile(webmBlob));
-                progressText.textContent = `Converting... (This may take a while)`;
+                progressText.textContent = `Converting to ${format}... (Processing)`;
                 
-                await ffmpeg.run('-i', inputName, '-c:v', 'copy', outputName); 
-                const data = ffmpeg.FS('readFile', outputName);
+                // Use fallback copy if possible for speed, or re-encode if AVI
+                if(format === 'mp4') {
+                     await ffmpeg.run('-i', inputName, '-c:v', 'copy', outputName);
+                } else {
+                     await ffmpeg.run('-i', inputName, outputName);
+                }
 
+                const data = ffmpeg.FS('readFile', outputName);
                 const newBlob = new Blob([data.buffer], { type: `video/${format}` });
                 downloadBlob(newBlob, `enhanced_${Date.now()}.${format}`);
 
@@ -550,7 +596,7 @@
 
             } catch (error) {
                 console.error(error);
-                alert(`Error during conversion: ${error.message}\nDownloading as WebM instead.`);
+                alert(`Error during conversion: ${error.message}\nSaved as WebM instead.`);
                 downloadBlob(webmBlob, `enhanced_fallback_${Date.now()}.webm`);
             } finally {
                 processingOverlay.classList.add('hidden');
@@ -573,7 +619,12 @@
         }
 
         function resetUI() {
-            formatSelect.disabled = false;
+            // Restore UI state based on compatibility
+            if(ffmpegSupported) {
+                formatSelect.disabled = false;
+            } else {
+                formatSelect.disabled = true; // Stay disabled/locked to WebM
+            }
             videoInput.disabled = false;
             sourceVideo.currentTime = 0;
             drawFrame();
